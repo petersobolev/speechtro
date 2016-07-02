@@ -1,0 +1,650 @@
+
+; SPEECHTRO by Frog
+; 1024 bytes intro for DiHalt'2016 demo party
+;
+; req: TI-99/4a with standard 32k expansion, PEB/NanoPEB, speech synth
+; (works w/o synth, but in silent mode)
+;
+; http://frog.enlight.ru
+; frog@enlight.ru
+;
+
+          def    start
+
+ws0       equ  >8300               ; Workspace 0 (till 831f)
+R0L       equ  ws0+1               ; Workspace 0 R0 low byte
+
+; speech synth constants
+
+SPCHRD  equ    >9000               ; addr to read from synth
+SPCHWT  equ    >9400               ; addr to write to synth   (>10 - read, >4x - Load-Address, >50 - speak, >60 = speak ext )
+
+
+; VDP constants
+
+VDPWD     equ  >8C00              ; VDP RAM write data
+VDPWA     equ  >8C02              ; VDP RAM read/write address
+VDPSTA    equ  >8802              ; VDP RAM status
+
+
+
+
+; GROM read constants
+
+WR0LB     equ  ws0+1               ; WORKSPACE R0 LOW BYTE
+GROMWA    equ  >9C02               ; GROM WRITE ADDRESS
+GROMRD    equ  >9800               ; GROM READ DATA
+
+; sprites const
+
+SPRATB    equ  >3b00               ; sprites attributes addr in VDP RAM
+SPRPTB    equ  >1800               ; sprites patterns addr in VDP RAM
+
+
+start:
+          limi      0
+
+          lwpi      ws0                 ; workspace >8300
+
+
+; Setup GMode II (Bitmap)
+
+          li        r1,vdpinit
+nextreg:
+          mov       *r1,r0
+; do vwtr
+          movb      @R0L,@vdpwa         ; send low byte (value) to write to vdp register
+          ori       r0,>8000            ; set up a vdp register write operation
+          movb      r0,@vdpwa           ; send high byte (address) of vdp register
+
+          inct      r1
+          ci        r1,vdpinit_end
+          jne       nextreg
+
+; Init Name table
+
+          li        r0,>3800            ; Screen Image Table (Name) start address
+          movb      @R0L,@vdpwa         ; Send low byte of VDP RAM write address
+          ori       r0,>4000            ; Set read/write bits 14 and 15 to write (01)
+          movb      r0,@vdpwa           ; Send high byte of VDP RAM write address
+
+          clr       r1                  ; Start at zero
+          li        r2,3                ; Number of times to loop 0 - 255 pattern
+init1:
+          movb      r1,@vdpwd           ; Write byte to VDP RAM
+          ai        r1,>0100            ; Inc the value to write
+          jne       init1               ; Check if done writing pattern
+          dec       r2                  ; Pattern counter
+          jne       init1               ; Check if done
+
+* Clear Pattern Descriptor Table
+*
+          clr       r0                  ; Address of PDT >0000
+          clr       r1                  ; Value to write - all zero
+          li        r2,>1800            ; Number of times to write zero
+          bl        @vsmw
+
+; CLear Color Table
+; 0 Transparent, 1 Black, 2 Medium Green, 3 Light Green, 4 Dark Blue, 5 Light Blue, 6 Dark Red, 7 Cyan (Aqua Blue)
+; 8 Medium Red, 9 Light Red, A Dark Yellow, B Light Yellow, C Dark Green, D Magenta (Purple), E Gray, F White
+
+          li        r0,>2000            ; Address of Color Table >2000
+          li        r1,>4100            ; Default color is white on gray (fgbg)
+          li        r2,>1800            ; Number of times to write zero
+          bl        @vsmw
+
+
+
+; ============== sprites =======================
+
+
+; load sprites data
+
+          li        r0,SPRPTB           ; sprites area in VDP RAM
+          li        r3,SPR0             ; sprite data
+          li        r2,8*3             ; size of block to transfer
+          bl        @vmbw
+
+; load sprites attributes
+
+          li        r0,SPRATB           ; sprites area in VDP RAM
+          li        r3,spratt_1         ; sprite attrs
+          li        r2,4*11              ; size of block to transfer 4 bytes for one sprite
+          bl        @vmbw
+
+
+
+; PRINT TEXT
+
+          li        r0,>0000+(8*32*9)+(8*7)  ; Pattern Table
+          li        r1,str_1            ; text string address (ends with 0)
+          bl        @PrintStrGROM
+
+          li        r0,>0000+(8*32*11)+(8*4)  ; Pattern Table
+          li        r1,str_2            ; text string address (ends with 0)
+          bl        @PrintStrGROM
+
+          li        r0,>0000+(8*32*13)+(8*4)  ; Pattern Table
+          li        r1,str_3            ; text string address (ends with 0)
+          bl        @PrintStrGROM
+
+          li        r0,>0000+(8*32*15)+(8*13)  ; Pattern Table
+          li        r1,str_4            ; text string address (ends with 0)
+          bl        @PrintStrGROM
+
+
+
+; MAIN
+
+          li        r9,WORDS            ; list of words to speak (addrs)
+
+          li        r1,attrs            ; attrs table address (fgbg)
+          li        r4,32               ; number of frames before repeat sequence
+
+          li        r10,:0000001000000000           ; name = >0100 || >0200 (for bug-insect)
+
+
+nextframe:
+
+          li        r0,>2000+(8*32*8)   ; VDP Color Table start address
+
+          movb      @R0L,@vdpwa         ; Send low byte of VDP RAM write address
+          ori       r0,>4000            ; Set read/write bits 14 and 15 to write (01)
+          movb      r0,@vdpwa           ; Send high byte of VDP RAM write address
+
+          li        r3,8              ; number of line groups (height of each group = 8)
+
+nextlinegroup:
+
+          li        r2,32               ; number of blocks (8x8) to change
+
+; wait for vsync (fit 256x8 into v.retrace time)
+
+          movb      @VDPSTA,r0
+vsync:    movb      @VDPSTA,r0
+          andi      r0,>8000
+          jeq       vsync
+
+
+nextcblock:
+          movb      *r1+,@vdpwd
+          movb      *r1+,@vdpwd
+          movb      *r1+,@vdpwd
+          movb      *r1+,@vdpwd
+          movb      *r1+,@vdpwd
+          movb      *r1+,@vdpwd
+          movb      *r1+,@vdpwd
+          movb      *r1+,@vdpwd
+
+          ai        r1,-8
+          dec       r2
+          jne       nextcblock          ; draw full line block 8x8 px
+
+          inc       r1
+
+          dec       r3
+          jne       nextlinegroup       ; draw next line group (256x8 px)
+
+          ai        r1,-7               ; gradient shift for each next 8 lines
+
+
+
+          movb      @SPCHRD,r6
+          coc       @H8000,r6      ; check status, skip speech if previous word isn't completely spoken yet
+          jeq       notspeak
+
+
+; SPEECH CODE ----------------------
+
+          mov       *r9,r6         ; load address of next word to speak
+          jne       notfinish
+          li        r9,WORDS       ; addr = 0. no more words left. looping
+          mov       *r9,r6         ; load address of next word to speak
+notfinish:
+
+
+; loading speech address (5 nibbles of data required) using >4x Load-Address command
+; >4x >4x >4x >4x >40 (end marker >0). r6 - addr of word in synth ROM
+
+          li        r8,4           ; 4 nibbles
+loadlp:
+          src       r6,4           ; start with least significant nibble
+          mov       r6,r7
+          src       r7,4
+          andi      r7,>0f00       ; get only particular nibble
+          ori       r7,>4000       ; put in >4x00 format
+          movb      r7,@SPCHWT     ; write nibble
+          dec       r8
+          jne       loadlp
+          li        r7,>4000
+          movb      r7,@SPCHWT     ; write fifth nibble (end marker)
+
+          movb      @H50,@SPCHWT   ; execute speak command
+
+; now we must check if word spoken (see above in code)
+
+          inct       r9            ; go next word addr to speak
+
+
+; END OF SPEECH CODE -------------------
+
+notspeak:
+
+          dec       r4
+          jne       continue       ; check if it is time to restart color gradient
+          li        r4,32          ; repeat sequence
+          li        r1,attrs
+continue:
+
+
+; SQUARES --------------------------------
+
+; do not use: r1,r4,r9
+; ok to use: r0,r2,r3, r6,r7,r8
+; free: r5,r10,r12 , r11(?)
+
+          li        r7,>000+(8*32*6)  ; pattern table addr
+
+          li        r8,2           ; two groups (top and bottom)
+nextsquaregroup:
+          clr       r6
+
+          mov       *r9,r3         ; shape of square based on current word addr
+          a         r8,r3
+
+nextsquare:
+
+          inct      r3
+          a         r8,r3
+          swpb      r3
+
+          mov       r7,r0
+
+;-----
+
+;  r0 - start addr (in VDP color table)
+;  r3 - pattern
+;  (width and height always 8 px)
+
+          movb      @R0L,@vdpwa         ; Send low byte of VDP RAM write address
+          ori       r0,>4000            ; Set read/write bits 14 and 15 to write (01)
+          movb      r0,@vdpwa           ; Send high byte of VDP RAM write address
+
+
+          li        r0,square_1
+          ci        r3,>a001
+          jh        bigblock
+          li        r0,square_2         ; small block
+
+bigblock:
+
+          li        r12,7
+nextbyte:
+          movb      *r0+,@vdpwd
+          dec       r12
+          jne       nextbyte
+
+;-----
+
+          ai        r7,8
+
+
+          inc       r6
+          ci        r6,32               ; number of squares
+          jne       nextsquare
+
+          ai        r7,8*32*10
+
+          dec       r8
+          jne       nextsquaregroup
+
+; END OF SQUARES -------------------------
+
+
+; SPRITES --------------------------------
+
+          li        r3,spratt_1+1       ; sprite attrs (X)
+          li        r0,1                ; step to move right by
+          li        r7,:1111111111111100
+
+nextsprite:
+          movb      *r3,r2              ; r2 = 0a00
+          swpb      r2
+
+          a         r0,r2               ; move stars right
+          joc       normalspeed
+          inv       r0
+          szc       r7,r0
+normalspeed:
+
+          swpb      r2
+          movb      r2,*r3
+
+          ai        r3,4                ; next sprite
+          ci        r3,spratt_end
+          jl        nextsprite
+
+; add some vertical movement for black bug (kind of ;)
+
+          ai        r3,-4
+          dec       r3
+          movb      r2,*r3
+
+          sla       r0,8
+          ab        r0,@spratt_2+3      ; two blinking stars
+          ab        r0,@spratt_8+3
+
+; black bug animation
+
+          li        r0,:0000001100000000
+          xor       r10,r0
+          movb      r0,@spratt_bug+2
+          mov       r0,r10
+
+; update sprites' attrs to VDP
+
+          li        r0,SPRATB           ; sprites area in VDP RAM
+          li        r3,spratt_1         ; sprite attrs
+          li        r2,4*11             ; size of block to transfer 4 bytes for one sprite
+          bl        @vmbw
+
+
+; END SPRITES ----------------------------
+
+
+          b         @nextframe
+; ===================================== END MAIN ========================================
+
+; colors data ----------
+
+; attr, attr, ... (foreground+background)
+
+; 0 Transparent, 1 Black, 2 Medium Green, 3 Light Green, 4 Dark Blue, 5 Light Blue, 6 Dark Red, 7 Cyan (Aqua Blue)
+; 8 Medium Red, 9 Light Red, A Dark Yellow, B Light Yellow, C Dark Green, D Magenta (Purple), E Gray, F White
+
+attrs:
+          BYTE >14,>15,>17,>1f,>1f,>17,>15,>14  ; (fgbg) blue-white-blue background
+          BYTE 0,>c1,>31,>f1,>f1,>31,>c1,0
+          BYTE >16,>19,>1b,>1f,>1f,>1b,>19,>16    ; red-white-red
+          BYTE 0,>41,>51,>f1,>f1,>51,>41,0
+          BYTE >1c,>12,>13,>1f,>1f,>13,>12,>1c    ; green-white-green
+          BYTE 0,0,0,0,0,0,0,0
+
+; text data -----------
+
+str_1:
+
+         text 'SPEECHTRO BY FROG'
+space:
+         byte 0
+
+str_2:
+         text 'IKB INTRO FOR TI COMPUTER'
+         byte 0
+str_3:
+         text 'RELEASED AT DIHALT PARTY'
+         byte 0
+str_4:
+         text 'RUSSIA'
+         byte 0
+
+; speech data ----------
+
+H50       byte >50            ; speak command
+H8000     data >8000          ; to check status
+
+WORDS:
+
+          data >351a ; HELLO
+          data >6dde ; THIS
+          data >3a32 ; IS
+          data >6070 ; SMALL
+          data >53ee ; PROGRAM
+          data >14e7 ; FOR
+          data >6551 ; T
+          data >3793 ; I
+          data >4a4e ; 90
+          data >1664 ; 9
+          data >2034 ; COMPUTER
+
+          data >4000 ; pause
+
+          data >3793 ; I
+          data >1830 ; AM
+          data >4aab ; NOT
+          data >3872 ; IN
+          data >3757 ; HURRY
+          data >1c20 ; BUT
+
+          data >3a7a ; IT
+          data >3a32 ; IS
+          data >3b4c ; JUST
+          data >1409 ; ONE
+          data >3b8a ; K
+          data >45df ; MODULE
+          data >6153 ; SO
+          data >61c6 ; SORRY
+          data >14e7 ; FOR
+          data >5e5c ; SHORT
+          data >446c ; MESSAGE
+
+          data >4000 ; pause
+
+          data >5093 ; PLEASE
+          data >2ad7 ; FIND
+          data >6e69 ; TIME
+          data >145c ; TO
+          data >1e54 ; COME
+          data >145c ; TO
+          data >1c86 ; C
+          data >1c86 ; C
+          data >15a8 ; 1
+          data >65bf ; 6
+
+          data >4000 ; pause
+
+          data >3793 ; I
+          data >19e8 ; ASSUME
+          data >71be ; YOU
+          data >729d ; UNDERSTAND
+          data >77bc ; WHAT
+          data >3793 ; I
+          data >5aa1 ; SAID
+          data >4cdc ; OR
+          data >6fbb ; TRY
+          data >145c ; TO
+          data >34e5 ; HEAR
+          data >17a5 ; AGAIN
+
+          data >4000 ; pause
+
+          data 0
+
+; SPRITES DATA -----------------------------
+
+; Using one star pattern for most sprites
+
+; Sprite attributes: Y, X, Name, EC/Color
+spratt_1:
+          BYTE 56, 10, 0, >f     ; sprite
+spratt_2:
+          BYTE 58, 90, 0, >c     ; sprite
+spratt_3:
+          BYTE 59, 30, 0, >e     ; sprite
+spratt_4:
+          BYTE 61, 200, 0, >a     ; sprite
+spratt_5:
+          BYTE 60, 60, 0, >6     ; sprite
+
+spratt_6:
+          BYTE 128, 2, 0, >6     ; sprite
+spratt_7:
+          BYTE 130, 60, 0, >c     ; sprite
+spratt_8:
+          BYTE 131, 20, 0, >a     ; sprite
+spratt_9:
+          BYTE 132, 170, 0, >e     ; sprite
+spratt_10:
+          BYTE 129, 120, 0, >f     ; sprite
+
+spratt_bug:
+          BYTE 90, 1, 1, >1     ; sprite (name = 1|2)
+
+spratt_end:
+          BYTE >D0    ; stop sprites processing
+
+
+; Sprite patterns (32 bytes for 16x16 sprite)
+; 1 3
+; 2 4
+
+; Sprites
+
+SPR0:
+          BYTE :10000000 ; star
+          BYTE :00000000
+          BYTE :00000000
+          BYTE :00000000
+          BYTE :00000000
+          BYTE :00000000
+          BYTE :00000000
+          BYTE :00000000
+
+          BYTE >10,>78,>7A,>BC,>3E,>5A,>0C,>00    ; bug, frame 1
+          BYTE >08,>74,>78,>7C,>BE,>1A,>2C,>00    ; bug, frame 2
+
+
+; Squares
+
+square_1:
+          BYTE :00000000
+          BYTE :01111110
+          BYTE :01111110
+          BYTE :01111110
+          BYTE :01111110
+          BYTE :01111110
+          BYTE :01111110
+;          BYTE :00000000
+
+square_2:
+          BYTE :00000000
+          BYTE :00000000
+          BYTE :00111100
+          BYTE :00100100
+          BYTE :00100100
+          BYTE :00111100
+          BYTE :00000000
+;          BYTE :00000000
+
+
+; Some values for Gmode 2 VDP init
+
+vdpinit:
+          DATA >0002            ; Set bit 6 of VDP reg 0 (Graphics II mode)
+
+;         bits: [4/16k] [blank] [IE] [M1] [M2] [0] [SPR.SIZE] [SPR.MAG]
+          DATA :0000001111000010            ; L to R 0-15
+
+          DATA >020e            ; Move Screen Image Table (Name) to >3800
+          DATA >03ff            ; Move Color Table to >2000
+          DATA >0403            ; Pattern Descriptor Table to >0000
+          DATA >0576            ; Move Sprite Attribute List to >3b00
+          DATA >0603            ; Reg 6: Sprite Pattern Table  >1800
+          DATA >0f01            ; Reg 7 (>0F): text-mode color and backdrop color (fgbg)
+vdpinit_end:
+
+
+;----------------
+; Prints text using charset from GROM
+;
+;  r0 - start addr (in VDP pattern table)
+;  r1 - text addr (zero-terminated)
+; out:
+;  none
+
+PrintStrGROM:
+
+          movb      @R0L,@vdpwa         ; Send low byte of VDP RAM write address
+          ori       r0,>4000            ; Set read/write bits 14 and 15 to write (01)
+          movb      r0,@vdpwa           ; Send high byte of VDP RAM write address
+
+          li        r2, >0874+(8)       ; starting GROM address of small charset
+
+nextchr:
+          clr       r0
+          movb      *r1+,r0             ; Get char code
+
+
+          jeq       eol
+
+          li        r3,GROMRD           ; address pf charset at GROM
+          ci        r0, >2000           ; check if space (' ')
+          jne       nonspace
+          li        r3,space            ; set addr to BYTE 0
+nonspace:
+
+          swpb      r0
+          ai        r0,-65              ; char code correction ( >4100 to >0100 )
+          swpb      r0
+
+          mov       r0,r4               ; *7 and move to LSB:  (num << 3) - num
+          sla       r0,3
+          s         r4,r0
+          swpb      r0
+          a         r2,r0               ; get char pattern addr in GROM to R0
+
+          movb      r0,@GROMWA          ; set GROM read pointer to address 06B0 (high part)
+          movb      @WR0LB,@GROMWA      ; set GROM read pointer to address 06B0 (low part)
+
+          li        r0,7
+
+nextln:
+          movb      *r3,@vdpwd
+          dec       r0
+          jne       nextln
+
+          clr       @vdpwd              ; skip one byte
+
+          jmp       nextchr
+eol:
+
+          rt
+
+; ---------------
+
+
+; WRITING VDP DATA
+
+; VDP Single Byte Write - Single Byte Multiple Write
+
+vsbw:     li        r2,1                ; force the byte count to 1 for single byte write
+vsmw:     movb      @R0L,@vdpwa         ; send low byte of vdp ram write address
+          ori       r0,>4000            ; set read/write bits 14 and 15 to write (01)
+          movb      r0,@vdpwa           ; send high byte of vdp ram write address
+          andi      r0,>3fff            ; wait for the vdp and restore r0
+vsmwlp:   movb      r1,@vdpwd           ; write byte to vdp ram
+          dec       r2                  ; byte counter
+          jne       vsmwlp              ; check if done
+          rt
+
+
+; VDP Multiple Byte Write
+
+vmbw:     movb      @R0L,@vdpwa         ; send low byte of vdp ram write address
+          ori       r0,>4000            ; set read/write bits 14 and 15 to write (01)
+          movb      r0,@vdpwa           ; send high byte of vdp ram write address
+          andi      r0,>3fff            ; wait for the vdp and restore r0
+vmbwlp:   movb      *r3+,@vdpwd         ; write byte to vdp ram
+          dec       r2                  ; byte counter
+          jne       vmbwlp              ; check if done
+          rt
+
+
+endmarker
+
+size      equ       endmarker - start   ; just to estimate exact binary size
+
+          end       start
+
+
+
