@@ -3,7 +3,7 @@ Speechtro by Frog //ROi<br>
 1k intro for TI-99/4a<br>
 Released at DiHalt'2016<br>
 <p>
-![Alt text](https://raw.githubusercontent.com/petersobolev/speechtro/master/screenshot_300.jpg "Screenshot")
+<img src="screenshot_300.jpg"/>
 <p>
 Platform: TI-99/4a home computer (NTSC)<br>
 Required typical config: 32K RAM expansion (using NanoPEB, for example), speech synth and Editor/Assembler cartridge to run object file (works w/o synth, but in silent mode)<br>
